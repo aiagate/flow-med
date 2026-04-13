@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        # https://github.com/actions/checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install uv
+        # https://github.com/astral-sh/setup-uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          # Install a specific version of uv.
+          version: "0.11.4"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run ruff format check
+        run: uv run --frozen ruff format --check .
+
+      - name: Run ruff linting
+        run: uv run --frozen ruff check .
+
+      - name: Run type checking with pyright
+        run: uv run --frozen pyright
+
+      - name: Run tests
+        run: uv run --frozen pytest --cov --cov-report=term-missing

@@ -1,0 +1,31 @@
+{
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    },
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+  "editor.tabSize": 4,
+  "files.trimTrailingWhitespace": true,
+  "editor.renderWhitespace": "all",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.indexing": true,
+  "ruff.configuration": "./pyproject.toml",
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.coverage": true,
+    "**/.git": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/*.egg-info": true,
+    "**/.venv": true,
+    "**/htmlcov": true
+  },
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": true
+}
