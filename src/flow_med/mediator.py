@@ -29,11 +29,11 @@ class RequestHandler[T: Request[Any], R](ABC):
         """Automatically register the handler with the Mediator."""
         super().__init_subclass__(**kwargs)
 
-        # 抽象クラス（実装を持たないクラス）は登録しない
+        # Do not register abstract classes (classes without implementation)
         if getattr(cls, "__abstractmethods__", None):
             return
 
-        # RequestHandler[RequestType, ReturnType] から RequestType を取得
+        # Get RequestType from RequestHandler[RequestType, ReturnType]
         for base in getattr(cls, "__orig_bases__", []):
             if getattr(base, "__origin__", None) is RequestHandler:
                 request_type = base.__args__[0]
