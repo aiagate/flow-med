@@ -9,10 +9,10 @@ A high-performance, type-safe Mediator pattern implementation for Python 3.13+, 
 ## Features
 
 - **Result-Driven Development**: Built-in support for `flow-res` Result types, making error handling explicit and type-safe.
-- **Auto-Registration**: Handlers are automatically registered using Python 3.13's `__init_subclass__` and generic introspection.
+- **Auto-Registration**: Each `Mediator` discovers concrete handlers using Python 3.13's generic introspection.
 - **Dependency Injection**: Seamless integration with the `injector` library for robust dependency management.
 - **Native Async Support**: Designed from the ground up for `asyncio` with `AwaitableResult` support for elegant method chaining.
-- **Strict Type Safety**: Fully compatible with `pyright` and `mypy` using modern Python 3.13 type parameters.
+- **Strict Type Safety**: Public type contracts are checked by `pyright`/`mypy`, with result-type validation at handler registration.
 
 ## Installation
 
@@ -35,7 +35,7 @@ class GetUserRequest(Request[Result[str, Exception]]):
 
 ### 2. Implement Handler
 
-Handlers are automatically registered when defined. Use `@override` to ensure correct implementation.
+Concrete handlers are discovered by each `Mediator` instance. Use `@override` to ensure correct implementation.
 
 ```python
 from typing import override
@@ -49,7 +49,7 @@ class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
         return Ok(f"User {request.user_id}")
 ```
 
-### 3. Initialize and Send
+### 3. Create a Mediator and Send
 
 ```python
 import asyncio
@@ -57,12 +57,12 @@ from injector import Injector
 from flow_med import Mediator
 
 async def main():
-    # Initialize with an Injector
-    Mediator.initialize(Injector())
+    # Each application (or test) owns its Mediator and Injector.
+    mediator = Mediator(Injector())
 
     # Send request and chain results using flow-res
     result = await (
-        Mediator.send_async(GetUserRequest(user_id=1))
+        mediator.send_async(GetUserRequest(user_id=1))
         .map(lambda name: f"Hello, {name}!")
         .unwrap()
     )

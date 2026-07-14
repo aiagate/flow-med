@@ -27,6 +27,7 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/flow_med"]
+force-include = { "src/flow_med/py.typed" = "flow_med/py.typed" }
 
 [project.urls]
 Homepage = "https://github.com/aiagate/flow-med"
@@ -76,3 +77,9 @@ addopts = [
     "--cov-report=html",
 ]
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.pyright]
+include = ["src", "tests", "examples"]
+exclude = ["tests/typecheck"]
+venvPath = "."
+venv = ".venv"

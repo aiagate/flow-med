@@ -28,7 +28,7 @@ class GetUserRequest(Request[Result[str, Exception]]):
 
 
 # 4. Implement Handler with DI
-# RequestHandler is automatically registered.
+# RequestHandler implementations are discovered by each Mediator instance.
 class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
     # UserRepository is injected via the constructor
     @inject
@@ -42,15 +42,15 @@ class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
 
 
 async def main():
-    # 5. Initialize with an Injector containing our Module
+    # 5. Create a Mediator with an Injector containing our Module
     injector = Injector([UserModule()])
-    Mediator.initialize(injector)
+    mediator = Mediator(injector)
 
     print("--- Dependency Injection Example ---")
 
     # 6. Send request
     result = await (
-        Mediator.send_async(GetUserRequest(user_id=123))
+        mediator.send_async(GetUserRequest(user_id=123))
         .map(lambda name: f"Retrieved: {name}")
         .unwrap()
     )
