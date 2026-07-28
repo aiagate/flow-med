@@ -3,6 +3,8 @@
 from abc import abstractmethod
 from typing import Any, Generic, TypeVar, cast, override
 
+import flow_med
+import flow_med.mediator
 import pytest
 from flow_res import Ok, Result
 from injector import Injector, Module, inject
@@ -13,10 +15,19 @@ from flow_med import (
     HandlerRegistry,
     InvalidHandlerError,
     Mediator,
+    MediatorError,
     Request,
     RequestHandler,
 )
 from flow_med.mediator import _find_generic_base, _resolve_type
+
+
+def test_mediator_error_is_part_of_the_public_api() -> None:
+    assert flow_med.MediatorError is MediatorError
+    assert "MediatorError" in flow_med.__all__
+    assert "MediatorError" in flow_med.mediator.__all__
+    assert issubclass(HandlerNotFoundError, MediatorError)
+    assert issubclass(DuplicateHandlerError, MediatorError)
 
 
 class MyQuery(Request[Result[str, Exception]]):

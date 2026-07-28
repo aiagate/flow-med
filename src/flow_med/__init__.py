@@ -5,6 +5,7 @@ from .mediator import (
     HandlerRegistrationError,
     InvalidHandlerError,
     Mediator,
+    MediatorError,
     Request,
     RequestHandler,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "HandlerRegistrationError",
     "InvalidHandlerError",
     "Mediator",
+    "MediatorError",
     "Request",
     "RequestHandler",
 ]

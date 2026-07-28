@@ -307,6 +307,7 @@ __all__ = [
     "HandlerRegistrationError",
     "InvalidHandlerError",
     "Mediator",
+    "MediatorError",
     "Request",
     "RequestHandler",
 ]
