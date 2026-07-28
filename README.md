@@ -83,6 +83,39 @@ application startup; concurrent registry mutation is not guaranteed to be
 thread-safe. Separate registries are isolated, while sharing a registry
 explicitly shares its handler mappings.
 
+## Registration API
+
+`HandlerRegistry` and `Mediator` expose explicit registration operations:
+
+- `registry.handler(Handler)` infers the request type from the concrete
+  `RequestHandler[RequestType, ResultType]` contract. It can be used as
+  `@registry.handler` or called directly.
+- `registry.register(RequestType, Handler)` is useful when the request type
+  should be explicit. `mediator.register(...)` delegates to the mediator's
+  registry.
+- `registry.replace(RequestType, Handler)` intentionally changes an existing
+  mapping. `mediator.replace(...)` delegates to the same operation. Replacement
+  fails if no mapping exists, while either registration form fails if one
+  already exists.
+
+Registration validates that the handler is concrete, is declared for the given
+request type, and declares the same generic result type as the request. This is
+a declaration-level check: `flow-med` does not inspect or validate the value
+returned by `handle()` at runtime. Static type checking and the handler
+implementation remain responsible for honoring the declared result contract.
+
+When sending a request, `Mediator` asks its `Injector` for the registered
+handler type. The injector therefore controls handler construction, dependency
+injection, and lifetime according to its bindings and scopes; `Mediator` does
+not cache handler instances.
+
+Treat registry setup and mutation as an application-startup concern.
+`HandlerRegistry` does not provide synchronization for concurrent
+`handler()`, `register()`, or `replace()` calls, or for mutation concurrent
+with request dispatch. Once configuration is complete, the thread-safety of
+resolved handlers and their dependencies is determined by those objects and
+their injector scopes.
+
 ## Error behavior
 
 - Sending an unregistered request raises `HandlerNotFoundError` when the
@@ -115,6 +148,8 @@ result = await mediator.send_async(GetUserRequest(user_id=1)).unwrap()
 
 For test-specific overrides, create a separate registry or call
 `mediator.register(...)` and `mediator.replace(...)`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the complete v0.2 change summary.
 
 ## Requirements
 
