@@ -96,6 +96,14 @@ def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = set(wheel.namelist())
         assert "flow_med/py.typed" in names
+        metadata_path = next(
+            name for name in names if name.endswith(".dist-info/METADATA")
+        )
+        metadata = wheel.read(metadata_path).decode()
+        assert (
+            "Summary: A type-safe asynchronous Mediator implementation for Python"
+            in metadata
+        )
         wheel.extractall(package_dir)
 
     consumer = tmp_path / "consumer.py"
