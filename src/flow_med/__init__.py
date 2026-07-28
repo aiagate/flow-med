@@ -1,3 +1,21 @@
-from .mediator import HandlerNotFoundError, Mediator, Request, RequestHandler
+from .mediator import (
+    DuplicateHandlerError,
+    HandlerNotFoundError,
+    HandlerRegistry,
+    HandlerRegistrationError,
+    InvalidHandlerError,
+    Mediator,
+    Request,
+    RequestHandler,
+)
 
-__all__ = ["HandlerNotFoundError", "Mediator", "Request", "RequestHandler"]
+__all__ = [
+    "DuplicateHandlerError",
+    "HandlerNotFoundError",
+    "HandlerRegistry",
+    "HandlerRegistrationError",
+    "InvalidHandlerError",
+    "Mediator",
+    "Request",
+    "RequestHandler",
+]

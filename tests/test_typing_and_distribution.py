@@ -1,0 +1,131 @@
+"""Regression tests for static typing and distribution metadata."""
+
+import json
+import shutil
+import subprocess
+import zipfile
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).parents[1]
+
+
+def _pyright_command() -> list[str]:
+    local_executable = ROOT / ".venv" / "Scripts" / "pyright.exe"
+    executable = (
+        str(local_executable) if local_executable.exists() else shutil.which("pyright")
+    )
+    if executable is None:
+        pytest.skip("pyright is required for typing regression tests")
+    return [str(executable)]
+
+
+def _run_pyright(path: Path, tmp_path: Path, *, extra_paths: list[Path]) -> dict:
+    checked_path = tmp_path / path.name
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, checked_path)
+    config = tmp_path / "pyrightconfig.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        json.dumps(
+            {
+                "include": [checked_path.name],
+                "extraPaths": [
+                    str(item)
+                    for item in [
+                        *extra_paths,
+                        ROOT / ".venv" / "Lib" / "site-packages",
+                    ]
+                ],
+                "typeCheckingMode": "strict",
+            }
+        ),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [*_pyright_command(), "--project", str(config), "--outputjson"],
+        cwd=path.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return json.loads(completed.stdout)
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_rule"),
+    [
+        ("invalid_result.py", "reportIncompatibleMethodOverride"),
+        ("invalid_registration.py", "reportArgumentType"),
+    ],
+)
+def test_invalid_public_typing_contract_is_rejected(
+    fixture_name: str, expected_rule: str, tmp_path: Path
+) -> None:
+    report = _run_pyright(
+        ROOT / "tests" / "typecheck" / fixture_name,
+        tmp_path,
+        extra_paths=[ROOT / "src"],
+    )
+
+    assert report["summary"]["errorCount"] == 1, report
+    assert report["generalDiagnostics"][0]["rule"] == expected_rule
+
+
+def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
+    tmp_path: Path,
+) -> None:
+    build_dir = tmp_path / "dist"
+    build_dir.mkdir()
+    build = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(build_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+
+    wheels = list(build_dir.glob("*.whl"))
+    assert len(wheels) == 1
+
+    package_dir = tmp_path / "site-packages"
+    package_dir.mkdir()
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        names = set(wheel.namelist())
+        assert "flow_med/py.typed" in names
+        wheel.extractall(package_dir)
+
+    consumer = tmp_path / "consumer.py"
+    consumer.write_text(
+        """\
+from flow_res import Ok, Result
+from flow_med import HandlerRegistry, Mediator, Request, RequestHandler
+from injector import Injector
+
+
+class Query(Request[Result[int, Exception]]):
+    pass
+
+
+class Handler(RequestHandler[Query, Result[int, Exception]]):
+    async def handle(self, request: Query) -> Result[int, Exception]:
+        return Ok(1)
+
+
+registry = HandlerRegistry()
+registry.handler(Handler)
+mediator = Mediator(Injector(), registry)
+mediator.send_async(Query())
+""",
+        encoding="utf-8",
+    )
+    report = _run_pyright(
+        consumer,
+        tmp_path / "consumer-config",
+        extra_paths=[package_dir, ROOT / ".venv" / "Lib" / "site-packages"],
+    )
+
+    assert report["summary"]["errorCount"] == 0
