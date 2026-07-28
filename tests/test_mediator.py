@@ -1,4 +1,4 @@
-"""Behavioral regression tests for the instance-based Mediator API."""
+"""Behavioral regression tests for scoped handler registries."""
 
 from abc import abstractmethod
 from typing import Any, Generic, TypeVar, cast, override
@@ -10,6 +10,7 @@ from injector import Injector, Module, inject
 from flow_med import (
     DuplicateHandlerError,
     HandlerNotFoundError,
+    HandlerRegistry,
     InvalidHandlerError,
     Mediator,
     Request,
@@ -33,12 +34,13 @@ class AnotherQuery(Request[Result[int, Exception]]):
 
 
 @pytest.mark.anyio
-async def test_mediator_sends_to_an_auto_registered_handler(
-    mediator: Mediator,
-) -> None:
-    result = await mediator.send_async(MyQuery()).unwrap()
+async def test_registry_decorator_registers_and_sends() -> None:
+    registry = HandlerRegistry()
 
-    assert result == "Handled"
+    assert registry.handler(MyQueryHandler) is MyQueryHandler
+
+    mediator = Mediator(Injector(), registry)
+    assert await mediator.send_async(MyQuery()).unwrap() == "Handled"
 
 
 @pytest.mark.anyio
@@ -65,22 +67,12 @@ class AbstractQueryHandler(RequestHandler[AbstractQuery, Result[str, Exception]]
         return Ok(self.required_dependency())
 
 
-@pytest.mark.anyio
-async def test_abstract_handler_is_not_auto_registered(
-    mediator: Mediator,
-) -> None:
-    with pytest.raises(HandlerNotFoundError):
-        await mediator.send_async(AbstractQuery())
-
-
 RequestT = TypeVar("RequestT", bound=Request[Any])
 
 
 class GenericHandler(
     RequestHandler[RequestT, Result[str, Exception]], Generic[RequestT]
 ):
-    """Intermediate generic handler; it must not be registered by its TypeVar."""
-
     @abstractmethod
     async def handle(self, request: RequestT) -> Result[str, Exception]:
         pass
@@ -97,43 +89,66 @@ class ConcreteGenericHandler(GenericHandler[GenericQuery]):
 
 
 @pytest.mark.anyio
-async def test_concrete_handler_through_generic_base_is_auto_registered(
-    mediator: Mediator,
-) -> None:
-    result = await mediator.send_async(GenericQuery()).unwrap()
+async def test_decorator_resolves_a_concrete_intermediate_generic_handler() -> None:
+    registry = HandlerRegistry()
+    registry.handler(ConcreteGenericHandler)
 
-    assert result == "Concrete generic handler"
+    mediator = Mediator(Injector(), registry)
+    assert (
+        await mediator.send_async(GenericQuery()).unwrap() == "Concrete generic handler"
+    )
 
 
-@pytest.mark.anyio
-async def test_duplicate_manual_registration_is_rejected(
-    mediator: Mediator,
-) -> None:
-    """A second registration must not silently change the selected handler."""
+def test_decorator_rejects_handlers_without_a_concrete_contract() -> None:
+    registry = HandlerRegistry()
 
+    with pytest.raises(InvalidHandlerError, match="concrete RequestHandler"):
+        registry.handler(cast(Any, object))
+
+    with pytest.raises(InvalidHandlerError, match="abstract"):
+        registry.handler(AbstractQueryHandler)
+
+    HandlerResultT = TypeVar("HandlerResultT")
+
+    class GenericResultHandler(
+        RequestHandler[AnotherQuery, HandlerResultT], Generic[HandlerResultT]
+    ):
+        @override
+        async def handle(self, request: AnotherQuery) -> HandlerResultT:
+            raise NotImplementedError
+
+    with pytest.raises(InvalidHandlerError, match="concrete RequestHandler"):
+        registry.handler(cast(Any, GenericResultHandler))
+
+
+def test_duplicate_registration_is_rejected_at_registration_time() -> None:
     class DuplicateQuery(Request[Result[str, Exception]]):
         pass
 
-    class DuplicateQueryHandler(RequestHandler[DuplicateQuery, Result[str, Exception]]):
+    class FirstHandler(RequestHandler[DuplicateQuery, Result[str, Exception]]):
         @override
         async def handle(self, request: DuplicateQuery) -> Result[str, Exception]:
             return Ok("first")
 
-    mediator.register(DuplicateQuery, DuplicateQueryHandler)
+    class SecondHandler(RequestHandler[DuplicateQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: DuplicateQuery) -> Result[str, Exception]:
+            return Ok("second")
+
+    registry = HandlerRegistry()
+    registry.handler(FirstHandler)
 
     with pytest.raises(DuplicateHandlerError, match="Multiple handlers"):
-        mediator.register(DuplicateQuery, DuplicateQueryHandler)
-
-    assert await mediator.send_async(DuplicateQuery()).unwrap() == "first"
+        registry.handler(SecondHandler)
 
 
 def test_registration_validation_and_explicit_replacement(mediator: Mediator) -> None:
-    class DuplicateQuery(Request[Result[str, Exception]]):
+    class Query(Request[Result[str, Exception]]):
         pass
 
-    class DuplicateQueryHandler(RequestHandler[DuplicateQuery, Result[str, Exception]]):
+    class QueryHandler(RequestHandler[Query, Result[str, Exception]]):
         @override
-        async def handle(self, request: DuplicateQuery) -> Result[str, Exception]:
+        async def handle(self, request: Query) -> Result[str, Exception]:
             return Ok("first")
 
     class OtherQuery(Request[Result[str, Exception]]):
@@ -145,65 +160,30 @@ def test_registration_validation_and_explicit_replacement(mediator: Mediator) ->
             return Ok("other")
 
     with pytest.raises(InvalidHandlerError, match="request_type"):
-        mediator.register(cast(Any, object), DuplicateQueryHandler)
+        mediator.register(cast(Any, object), QueryHandler)
     with pytest.raises(InvalidHandlerError, match="RequestHandler"):
-        mediator.register(DuplicateQuery, cast(Any, object))
+        mediator.register(Query, cast(Any, object))
     with pytest.raises(InvalidHandlerError, match="declared"):
-        mediator.register(DuplicateQuery, cast(Any, OtherHandler))
+        mediator.register(Query, cast(Any, OtherHandler))
     with pytest.raises(InvalidHandlerError, match="abstract"):
         mediator.register(AbstractQuery, AbstractQueryHandler)
     with pytest.raises(HandlerNotFoundError):
-        mediator.replace(DuplicateQuery, DuplicateQueryHandler)
+        mediator.replace(Query, QueryHandler)
 
-    mediator.register(DuplicateQuery, DuplicateQueryHandler)
+    mediator.register(Query, QueryHandler)
 
-    class ReplacementHandler(RequestHandler[DuplicateQuery, Result[str, Exception]]):
+    with pytest.raises(DuplicateHandlerError):
+        mediator.register(Query, QueryHandler)
+
+    class ReplacementHandler(RequestHandler[Query, Result[str, Exception]]):
         @override
-        async def handle(self, request: DuplicateQuery) -> Result[str, Exception]:
+        async def handle(self, request: Query) -> Result[str, Exception]:
             return Ok("replacement")
 
-    mediator.replace(DuplicateQuery, ReplacementHandler)
+    mediator.replace(Query, ReplacementHandler)
 
 
-@pytest.mark.anyio
-async def test_duplicate_auto_handlers_are_rejected(mediator: Mediator) -> None:
-    class AutoDuplicateQuery(Request[Result[str, Exception]]):
-        pass
-
-    class FirstHandler(RequestHandler[AutoDuplicateQuery, Result[str, Exception]]):
-        @override
-        async def handle(self, request: AutoDuplicateQuery) -> Result[str, Exception]:
-            return Ok("first")
-
-    class SecondHandler(RequestHandler[AutoDuplicateQuery, Result[str, Exception]]):
-        @override
-        async def handle(self, request: AutoDuplicateQuery) -> Result[str, Exception]:
-            return Ok("second")
-
-    class MalformedHandler(RequestHandler):
-        async def handle(self, request: Any) -> Any:
-            return None
-
-    class InvalidRequestHandler(RequestHandler[Any, Any]):
-        async def handle(self, request: Any) -> Any:
-            return None
-
-    ResultT = TypeVar("ResultT")
-
-    class GenericResultHandler(
-        RequestHandler[AutoDuplicateQuery, ResultT], Generic[ResultT]
-    ):
-        async def handle(self, request: AutoDuplicateQuery) -> ResultT:
-            raise NotImplementedError
-
-    with pytest.raises(DuplicateHandlerError, match="Multiple handlers"):
-        await mediator.send_async(AutoDuplicateQuery())
-
-
-@pytest.mark.anyio
-async def test_inconsistent_result_type_is_rejected_on_manual_registration(
-    mediator: Mediator,
-) -> None:
+def test_inconsistent_result_type_is_rejected(mediator: Mediator) -> None:
     class NumberQuery(Request[Result[int, Exception]]):
         pass
 
@@ -214,6 +194,69 @@ async def test_inconsistent_result_type_is_rejected_on_manual_registration(
 
     with pytest.raises(InvalidHandlerError, match="result type"):
         mediator.register(NumberQuery, WrongResultHandler)
+
+
+@pytest.mark.anyio
+async def test_separate_registries_isolate_handlers_for_the_same_request() -> None:
+    class SharedQuery(Request[Result[str, Exception]]):
+        pass
+
+    class FirstHandler(RequestHandler[SharedQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: SharedQuery) -> Result[str, Exception]:
+            return Ok("first")
+
+    class SecondHandler(RequestHandler[SharedQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: SharedQuery) -> Result[str, Exception]:
+            return Ok("second")
+
+    first_registry = HandlerRegistry()
+    first_registry.handler(FirstHandler)
+    second_registry = HandlerRegistry()
+    second_registry.handler(SecondHandler)
+
+    first = Mediator(Injector(), first_registry)
+    second = Mediator(Injector(), second_registry)
+
+    assert await first.send_async(SharedQuery()).unwrap() == "first"
+    assert await second.send_async(SharedQuery()).unwrap() == "second"
+
+
+@pytest.mark.anyio
+async def test_registry_is_a_live_reference() -> None:
+    class LateQuery(Request[Result[str, Exception]]):
+        pass
+
+    class FirstHandler(RequestHandler[LateQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: LateQuery) -> Result[str, Exception]:
+            return Ok("first")
+
+    class SecondHandler(RequestHandler[LateQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: LateQuery) -> Result[str, Exception]:
+            return Ok("second")
+
+    registry = HandlerRegistry()
+    mediator = Mediator(Injector(), registry)
+
+    registry.handler(FirstHandler)
+    assert await mediator.send_async(LateQuery()).unwrap() == "first"
+
+    registry.replace(LateQuery, SecondHandler)
+    assert await mediator.send_async(LateQuery()).unwrap() == "second"
+
+
+@pytest.mark.anyio
+async def test_default_registries_are_private_to_each_mediator() -> None:
+    first = Mediator(Injector())
+    second = Mediator(Injector())
+    first.register(MyQuery, MyQueryHandler)
+
+    assert await first.send_async(MyQuery()).unwrap() == "Handled"
+    with pytest.raises(HandlerNotFoundError):
+        await second.send_async(MyQuery())
 
 
 class Dependency:
@@ -243,19 +286,12 @@ class LifecycleHandler(RequestHandler[LifecycleQuery, Result[str, Exception]]):
         return Ok(self.dependency.value)
 
 
-def test_mediators_have_independent_injectors_and_registries() -> None:
-    first = Mediator(Injector([DependencyModule("first")]))
-    second = Mediator(Injector([DependencyModule("second")]))
-
-    assert first is not second
-
-
 @pytest.mark.anyio
-async def test_pending_send_uses_its_mediator_instance(
-    mediator: Mediator,
-) -> None:
-    first = Mediator(Injector([DependencyModule("first")]))
-    second = Mediator(Injector([DependencyModule("second")]))
+async def test_pending_send_uses_its_mediator_instance() -> None:
+    registry = HandlerRegistry()
+    registry.handler(LifecycleHandler)
+    first = Mediator(Injector([DependencyModule("first")]), registry)
+    second = Mediator(Injector([DependencyModule("second")]), registry)
 
     pending = first.send_async(LifecycleQuery())
     del second
@@ -264,78 +300,27 @@ async def test_pending_send_uses_its_mediator_instance(
 
 
 @pytest.mark.anyio
-async def test_manual_registration_and_explicit_replace(
+async def test_mediator_register_and_replace_delegate_to_its_registry(
     mediator: Mediator,
 ) -> None:
-    class LateQuery(Request[Result[str, Exception]]):
+    class Query(Request[Result[str, Exception]]):
         pass
 
-    class FirstHandler(RequestHandler[LateQuery, Result[str, Exception]]):
+    class FirstHandler(RequestHandler[Query, Result[str, Exception]]):
         @override
-        async def handle(self, request: LateQuery) -> Result[str, Exception]:
+        async def handle(self, request: Query) -> Result[str, Exception]:
             return Ok("first")
 
-    class SecondHandler(RequestHandler[LateQuery, Result[str, Exception]]):
+    class SecondHandler(RequestHandler[Query, Result[str, Exception]]):
         @override
-        async def handle(self, request: LateQuery) -> Result[str, Exception]:
+        async def handle(self, request: Query) -> Result[str, Exception]:
             return Ok("second")
 
-    mediator.register(LateQuery, FirstHandler)
-    assert await mediator.send_async(LateQuery()).unwrap() == "first"
+    mediator.register(Query, FirstHandler)
+    assert await mediator.send_async(Query()).unwrap() == "first"
 
-    mediator.replace(LateQuery, SecondHandler)
-    assert await mediator.send_async(LateQuery()).unwrap() == "second"
-
-
-def test_invalid_manual_registration_is_rejected(mediator: Mediator) -> None:
-    with pytest.raises(InvalidHandlerError, match="Request subclass"):
-        mediator.register(cast(Any, object), cast(Any, object))
-
-    with pytest.raises(InvalidHandlerError, match="RequestHandler subclass"):
-        mediator.register(AnotherQuery, cast(Any, object))
-
-    class AbstractManualHandler(RequestHandler[AnotherQuery, Result[int, Exception]]):
-        @abstractmethod
-        def dependency(self) -> None:
-            pass
-
-        @override
-        async def handle(self, request: AnotherQuery) -> Result[int, Exception]:
-            return Ok(1)
-
-    with pytest.raises(InvalidHandlerError, match="abstract"):
-        mediator.register(AnotherQuery, AbstractManualHandler)
-
-    class OtherQuery(Request[Result[int, Exception]]):
-        pass
-
-    class OtherHandler(RequestHandler[OtherQuery, Result[int, Exception]]):
-        @override
-        async def handle(self, request: OtherQuery) -> Result[int, Exception]:
-            return Ok(1)
-
-    with pytest.raises(InvalidHandlerError, match="declared for"):
-        mediator.register(AnotherQuery, cast(Any, OtherHandler))
-
-
-@pytest.mark.anyio
-async def test_handlers_without_concrete_generic_contract_are_ignored(
-    mediator: Mediator,
-) -> None:
-    class IncompleteHandler(RequestHandler):
-        @override
-        async def handle(self, request: Any) -> Any:
-            return None
-
-    HandlerResultT = TypeVar("HandlerResultT")
-
-    class TypeVarResultHandler(RequestHandler[AnotherQuery, HandlerResultT]):
-        @override
-        async def handle(self, request: AnotherQuery) -> HandlerResultT:
-            raise NotImplementedError
-
-    with pytest.raises(HandlerNotFoundError):
-        await mediator.send_async(AnotherQuery())
+    mediator.replace(Query, SecondHandler)
+    assert await mediator.send_async(Query()).unwrap() == "second"
 
 
 def test_generic_introspection_handles_non_matching_and_nested_types() -> None:

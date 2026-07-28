@@ -23,9 +23,8 @@ class Request[R]:
 class RequestHandler[T: Request[Any], R](ABC):
     """Base class for request handlers.
 
-    Concrete subclasses are discovered by each :class:`Mediator` instance.
-    Discovery is intentionally deferred to the mediator so no process-wide
-    mutable registry is needed.
+    Concrete subclasses are registered with an application-owned
+    :class:`HandlerRegistry`.
     """
 
     @abstractmethod
@@ -33,115 +32,65 @@ class RequestHandler[T: Request[Any], R](ABC):
         """Handle the given request."""
         pass
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Keep subclass creation side-effect free.
 
-        ``ABCMeta`` has not finished calculating ``__abstractmethods__`` while
-        this hook runs.  Mediator discovery therefore performs the abstract
-        class check after class creation instead.
-        """
+class HandlerRegistry:
+    """Store validated request-handler mappings for one application scope."""
 
-        super().__init_subclass__(**kwargs)
-
-
-class Mediator:
-    """Send requests to handlers resolved from an instance-owned registry."""
-
-    def __init__(self, injector: Injector) -> None:
-        self._injector = injector
+    def __init__(self) -> None:
         self._request_handlers: dict[
             type[Request[Any]], type[RequestHandler[Any, Any]]
         ] = {}
-        self._manual_requests: set[type[Request[Any]]] = set()
 
-    def send_async[T, E: Exception](
-        self, request: Request[Result[T, E]]
-    ) -> AwaitableResult[T, E]:
-        """Send a request and return an awaitable result for method chaining."""
+    def handler[
+        T: Request[Any],
+        R,
+    ](self, handler_type: type[RequestHandler[T, R]]) -> type[RequestHandler[T, R]]:
+        """Register ``handler_type`` by inferring its concrete request contract."""
 
-        injector = self._injector
-
-        async def execute() -> Result[T, E]:
-            logger.debug("Mediator.send_async: %s", request)
-            self._discover_handlers(type(request))
-            handler_type = self._request_handlers.get(type(request))
-            if handler_type is None:
-                raise HandlerNotFoundError(request)
-
-            handler = injector.get(handler_type)
-            result = await handler.handle(request)
-            return cast(Result[T, E], result)
-
-        return AwaitableResult(execute())
+        contract = _handler_contract(handler_type)
+        if contract is None:
+            raise InvalidHandlerError(
+                handler_type,
+                "handler must declare a concrete RequestHandler request/result contract",
+            )
+        request_type, _ = contract
+        self.register(cast(type[T], request_type), handler_type)
+        return handler_type
 
     def register[
         T: Request[Any],
         R,
     ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
-        """Register a handler explicitly.
-
-        Registration is strict: an existing mapping must be replaced through
-        :meth:`replace`, and the handler's declared request/result contract is
-        checked before it is stored.
-        """
+        """Register a handler, rejecting invalid or duplicate contracts."""
 
         self._validate_request_type(request_type)
         self._validate_handler_type(request_type, handler_type)
         if request_type in self._request_handlers:
             raise DuplicateHandlerError(
-                request_type, self._request_handlers[request_type]
+                request_type, self._request_handlers[request_type], handler_type
             )
 
-        logger.debug("Mediator.register: %s -> %s", request_type, handler_type)
+        logger.debug("HandlerRegistry.register: %s -> %s", request_type, handler_type)
         self._request_handlers[request_type] = handler_type
-        self._manual_requests.add(request_type)
 
     def replace[
         T: Request[Any],
         R,
     ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
-        """Explicitly replace the handler registered for ``request_type``."""
+        """Replace an existing handler mapping explicitly."""
 
         self._validate_request_type(request_type)
         self._validate_handler_type(request_type, handler_type)
         if request_type not in self._request_handlers:
             raise HandlerNotFoundError(request_type)
 
-        logger.debug("Mediator.replace: %s -> %s", request_type, handler_type)
+        logger.debug("HandlerRegistry.replace: %s -> %s", request_type, handler_type)
         self._request_handlers[request_type] = handler_type
-        self._manual_requests.add(request_type)
 
-    def _discover_handlers(self, request_type_to_find: type[Request[Any]]) -> None:
-        """Discover concrete handlers for one request type."""
-
-        for handler_type in _iter_handler_types(RequestHandler):
-            if inspect.isabstract(handler_type):
-                continue
-
-            contract = _handler_contract(handler_type)
-            if contract is None:
-                continue
-            declared_request_type, handler_result = contract
-            if declared_request_type is not request_type_to_find:
-                continue
-            if declared_request_type in self._manual_requests:
-                continue
-
-            self._validate_result_type(
-                declared_request_type, handler_type, handler_result
-            )
-            existing = self._request_handlers.get(declared_request_type)
-            if existing is None:
-                logger.debug(
-                    "Auto-registering handler: %s -> %s",
-                    declared_request_type,
-                    handler_type,
-                )
-                self._request_handlers[declared_request_type] = handler_type
-            elif existing is not handler_type:
-                raise DuplicateHandlerError(
-                    declared_request_type, existing, handler_type
-                )
+    def _handler_for(
+        self, request_type: type[Request[Any]]
+    ) -> type[RequestHandler[Any, Any]] | None:
+        return self._request_handlers.get(request_type)
 
     def _validate_request_type(self, request_type: type[Any]) -> None:
         if not isinstance(request_type, type) or not issubclass(request_type, Request):
@@ -192,20 +141,49 @@ class Mediator:
             )
 
 
-def _iter_handler_types(base: type[Any]) -> list[type[RequestHandler[Any, Any]]]:
-    """Return all subclasses recursively, without relying on mutable globals."""
+class Mediator:
+    """Send requests to handlers resolved from an instance-owned registry."""
 
-    discovered: list[type[RequestHandler[Any, Any]]] = []
-    seen: set[type[Any]] = set()
-    pending = list(base.__subclasses__())
-    while pending:
-        candidate = pending.pop()
-        if candidate in seen:  # pragma: no cover - defensive for diamond inheritance
-            continue
-        seen.add(candidate)
-        discovered.append(cast(type[RequestHandler[Any, Any]], candidate))
-        pending.extend(candidate.__subclasses__())
-    return discovered
+    def __init__(
+        self, injector: Injector, registry: HandlerRegistry | None = None
+    ) -> None:
+        self._injector = injector
+        self._registry = HandlerRegistry() if registry is None else registry
+
+    def send_async[T, E: Exception](
+        self, request: Request[Result[T, E]]
+    ) -> AwaitableResult[T, E]:
+        """Send a request and return an awaitable result for method chaining."""
+
+        injector = self._injector
+
+        async def execute() -> Result[T, E]:
+            logger.debug("Mediator.send_async: %s", request)
+            handler_type = self._registry._handler_for(type(request))
+            if handler_type is None:
+                raise HandlerNotFoundError(request)
+
+            handler = injector.get(handler_type)
+            result = await handler.handle(request)
+            return cast(Result[T, E], result)
+
+        return AwaitableResult(execute())
+
+    def register[
+        T: Request[Any],
+        R,
+    ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
+        """Register a handler in this mediator's live registry."""
+
+        self._registry.register(request_type, handler_type)
+
+    def replace[
+        T: Request[Any],
+        R,
+    ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
+        """Replace a handler in this mediator's live registry."""
+
+        self._registry.replace(request_type, handler_type)
 
 
 def _handler_contract(
@@ -324,6 +302,7 @@ class DuplicateHandlerError(HandlerRegistrationError):
 
 __all__ = [
     "DuplicateHandlerError",
+    "HandlerRegistry",
     "HandlerNotFoundError",
     "HandlerRegistrationError",
     "InvalidHandlerError",

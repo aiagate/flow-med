@@ -4,7 +4,7 @@ from typing import override
 from flow_res import Ok, Result
 from injector import Injector
 
-from flow_med import Mediator, Request, RequestHandler
+from flow_med import HandlerRegistry, Mediator, Request, RequestHandler
 
 
 # 1. Define Request and Result
@@ -13,8 +13,11 @@ class GetUserRequest(Request[Result[str, Exception]]):
         self.user_id = user_id
 
 
-# 2. Implement Handler
-# Concrete handlers are discovered by each Mediator instance.
+# 2. Implement and register Handler
+registry = HandlerRegistry()
+
+
+@registry.handler
 class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
     @override
     async def handle(self, request: GetUserRequest) -> Result[str, Exception]:
@@ -25,7 +28,7 @@ class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
 async def main():
     # 3. Create a Mediator with an Injector.
     # In a real app, configure the Injector with your modules here.
-    mediator = Mediator(Injector())
+    mediator = Mediator(Injector(), registry)
 
     print("--- Basic Usage Example ---")
 

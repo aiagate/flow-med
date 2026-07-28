@@ -9,7 +9,7 @@ A high-performance, type-safe Mediator pattern implementation for Python 3.13+, 
 ## Features
 
 - **Result-Driven Development**: Built-in support for `flow-res` Result types, making error handling explicit and type-safe.
-- **Auto-Registration**: Each `Mediator` discovers concrete handlers using Python 3.13's generic introspection.
+- **Scoped Registration**: Application-owned registries keep handler discovery explicit and isolated.
 - **Dependency Injection**: Seamless integration with the `injector` library for robust dependency management.
 - **Native Async Support**: Designed from the ground up for `asyncio` with `AwaitableResult` support for elegant method chaining.
 - **Strict Type Safety**: Public type contracts are checked by `pyright`/`mypy`, with result-type validation at handler registration.
@@ -35,13 +35,17 @@ class GetUserRequest(Request[Result[str, Exception]]):
 
 ### 2. Implement Handler
 
-Concrete handlers are discovered by each `Mediator` instance. Use `@override` to ensure correct implementation.
+Register concrete handlers with an application-owned `HandlerRegistry`. Use
+`@override` to ensure correct implementation.
 
 ```python
 from typing import override
 from flow_res import Ok, Result
-from flow_med import RequestHandler
+from flow_med import HandlerRegistry, RequestHandler
 
+registry = HandlerRegistry()
+
+@registry.handler
 class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
     @override
     async def handle(self, request: GetUserRequest) -> Result[str, Exception]:
@@ -57,8 +61,8 @@ from injector import Injector
 from flow_med import Mediator
 
 async def main():
-    # Each application (or test) owns its Mediator and Injector.
-    mediator = Mediator(Injector())
+    # Each application owns its Registry, Mediator, and Injector.
+    mediator = Mediator(Injector(), registry)
 
     # Send request and chain results using flow-res
     result = await (
@@ -72,6 +76,32 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+Registries are live references. Handlers added or explicitly replaced after a
+`Mediator` is created are visible to that mediator. Configure registries during
+application startup; concurrent registry mutation is not guaranteed to be
+thread-safe. Separate registries are isolated, while sharing a registry
+explicitly shares its handler mappings.
+
+## Migrating from v0.1
+
+v0.2 replaces the process-wide class API with instance-owned mediators and
+scoped registries:
+
+```python
+# v0.1
+Mediator.initialize(Injector())
+result = await Mediator.send_async(GetUserRequest(user_id=1)).unwrap()
+
+# v0.2
+registry = HandlerRegistry()
+registry.handler(GetUserHandler)
+mediator = Mediator(Injector(), registry)
+result = await mediator.send_async(GetUserRequest(user_id=1)).unwrap()
+```
+
+For test-specific overrides, create a separate registry or call
+`mediator.register(...)` and `mediator.replace(...)`.
 
 ## Requirements
 

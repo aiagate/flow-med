@@ -55,11 +55,14 @@ def _run_pyright(path: Path, tmp_path: Path, *, extra_paths: list[Path]) -> dict
 
 
 @pytest.mark.parametrize(
-    "fixture_name",
-    ["invalid_result.py", "invalid_registration.py"],
+    ("fixture_name", "expected_rule"),
+    [
+        ("invalid_result.py", "reportIncompatibleMethodOverride"),
+        ("invalid_registration.py", "reportArgumentType"),
+    ],
 )
 def test_invalid_public_typing_contract_is_rejected(
-    fixture_name: str, tmp_path: Path
+    fixture_name: str, expected_rule: str, tmp_path: Path
 ) -> None:
     report = _run_pyright(
         ROOT / "tests" / "typecheck" / fixture_name,
@@ -67,7 +70,8 @@ def test_invalid_public_typing_contract_is_rejected(
         extra_paths=[ROOT / "src"],
     )
 
-    assert report["summary"]["errorCount"] > 0, report
+    assert report["summary"]["errorCount"] == 1, report
+    assert report["generalDiagnostics"][0]["rule"] == expected_rule
 
 
 def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
@@ -98,7 +102,7 @@ def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
     consumer.write_text(
         """\
 from flow_res import Ok, Result
-from flow_med import Mediator, Request, RequestHandler
+from flow_med import HandlerRegistry, Mediator, Request, RequestHandler
 from injector import Injector
 
 
@@ -111,7 +115,9 @@ class Handler(RequestHandler[Query, Result[int, Exception]]):
         return Ok(1)
 
 
-mediator = Mediator(Injector())
+registry = HandlerRegistry()
+registry.handler(Handler)
+mediator = Mediator(Injector(), registry)
 mediator.send_async(Query())
 """,
         encoding="utf-8",

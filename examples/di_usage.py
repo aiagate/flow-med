@@ -4,7 +4,7 @@ from typing import override
 from flow_res import Ok, Result
 from injector import Injector, Module, inject, provider, singleton
 
-from flow_med import Mediator, Request, RequestHandler
+from flow_med import HandlerRegistry, Mediator, Request, RequestHandler
 
 
 # 1. External Service
@@ -27,8 +27,11 @@ class GetUserRequest(Request[Result[str, Exception]]):
         self.user_id = user_id
 
 
-# 4. Implement Handler with DI
-# RequestHandler implementations are discovered by each Mediator instance.
+# 4. Implement and register Handler with DI
+registry = HandlerRegistry()
+
+
+@registry.handler
 class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
     # UserRepository is injected via the constructor
     @inject
@@ -44,7 +47,7 @@ class GetUserHandler(RequestHandler[GetUserRequest, Result[str, Exception]]):
 async def main():
     # 5. Create a Mediator with an Injector containing our Module
     injector = Injector([UserModule()])
-    mediator = Mediator(injector)
+    mediator = Mediator(injector, registry)
 
     print("--- Dependency Injection Example ---")
 

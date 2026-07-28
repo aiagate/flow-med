@@ -1,6 +1,7 @@
 from .mediator import (
     DuplicateHandlerError,
     HandlerNotFoundError,
+    HandlerRegistry,
     HandlerRegistrationError,
     InvalidHandlerError,
     Mediator,
@@ -11,6 +12,7 @@ from .mediator import (
 __all__ = [
     "DuplicateHandlerError",
     "HandlerNotFoundError",
+    "HandlerRegistry",
     "HandlerRegistrationError",
     "InvalidHandlerError",
     "Mediator",
