@@ -83,6 +83,19 @@ application startup; concurrent registry mutation is not guaranteed to be
 thread-safe. Separate registries are isolated, while sharing a registry
 explicitly shares its handler mappings.
 
+## Error behavior
+
+- Sending an unregistered request raises `HandlerNotFoundError` when the
+  returned `AwaitableResult` is awaited.
+- Registering a second handler for the same request type raises
+  `DuplicateHandlerError`. Use `replace()` for an intentional replacement;
+  the request type must already be registered.
+- Handler lookup uses the exact `type(request)`. A handler registered for a
+  base request class does not handle its subclasses.
+- Exceptions raised by `Injector` or a handler propagate unchanged. They are
+  not converted into an `Err`; handlers must return an `Err` explicitly when
+  failure is part of the request's `Result` contract.
+
 ## Migrating from v0.1
 
 v0.2 replaces the process-wide class API with instance-owned mediators and
