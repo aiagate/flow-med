@@ -7,8 +7,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  verify-release:
+    name: verify release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Require an exact SemVer tag at the workflow commit
+        run: .github/scripts/verify-release-ref.sh
+
   pypi-publish:
     name: publish release to PyPI
+    needs: verify-release
     runs-on: ubuntu-latest
     environment:
       name: publish-prod
