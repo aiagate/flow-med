@@ -12,7 +12,7 @@ A high-performance, type-safe Mediator pattern implementation for Python 3.13+, 
 - **Scoped Registration**: Application-owned registries keep handler discovery explicit and isolated.
 - **Dependency Injection**: Seamless integration with the `injector` library for robust dependency management.
 - **Native Async Support**: Designed from the ground up for `asyncio` with `AwaitableResult` support for elegant method chaining.
-- **Strict Type Safety**: Public type contracts are checked by `pyright`/`mypy`, with result-type validation at handler registration.
+- **Strict Type Safety**: Public type contracts are checked by `pyright`, with result-type validation at handler registration.
 
 ## Installation
 
