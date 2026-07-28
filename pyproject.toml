@@ -29,6 +29,14 @@ source = "vcs"
 packages = ["src/flow_med"]
 force-include = { "src/flow_med/py.typed" = "flow_med/py.typed" }
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/flow_med",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+]
+
 [project.urls]
 Homepage = "https://github.com/aiagate/flow-med"
 Issues = "https://github.com/aiagate/flow-med/issues"

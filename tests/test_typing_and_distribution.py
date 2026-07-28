@@ -3,6 +3,7 @@
 import json
 import shutil
 import subprocess
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -10,6 +11,24 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
+
+
+def _build_distribution(tmp_path: Path, distribution: str) -> Path:
+    build_dir = tmp_path / "dist"
+    build_dir.mkdir()
+    build = subprocess.run(
+        ["uv", "build", f"--{distribution}", "--out-dir", str(build_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+
+    pattern = "*.whl" if distribution == "wheel" else "*.tar.gz"
+    artifacts = list(build_dir.glob(pattern))
+    assert len(artifacts) == 1
+    return artifacts[0]
 
 
 def _pyright_command() -> list[str]:
@@ -77,23 +96,11 @@ def test_invalid_public_typing_contract_is_rejected(
 def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
     tmp_path: Path,
 ) -> None:
-    build_dir = tmp_path / "dist"
-    build_dir.mkdir()
-    build = subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(build_dir)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert build.returncode == 0, build.stdout + build.stderr
-
-    wheels = list(build_dir.glob("*.whl"))
-    assert len(wheels) == 1
+    wheel_path = _build_distribution(tmp_path, "wheel")
 
     package_dir = tmp_path / "site-packages"
     package_dir.mkdir()
-    with zipfile.ZipFile(wheels[0]) as wheel:
+    with zipfile.ZipFile(wheel_path) as wheel:
         names = set(wheel.namelist())
         assert "flow_med/py.typed" in names
         metadata_path = next(
@@ -137,3 +144,25 @@ mediator.send_async(Query())
     )
 
     assert report["summary"]["errorCount"] == 0
+
+
+def test_sdist_contains_only_publishable_project_files(tmp_path: Path) -> None:
+    sdist_path = _build_distribution(tmp_path, "sdist")
+
+    with tarfile.open(sdist_path) as sdist:
+        names = {
+            Path(*Path(name).parts[1:]).as_posix()
+            for name in sdist.getnames()
+            if len(Path(name).parts) > 1
+        }
+
+    assert names == {
+        ".gitignore",
+        "LICENSE",
+        "PKG-INFO",
+        "README.md",
+        "pyproject.toml",
+        "src/flow_med/__init__.py",
+        "src/flow_med/mediator.py",
+        "src/flow_med/py.typed",
+    }
