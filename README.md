@@ -149,7 +149,9 @@ result = await mediator.send_async(GetUserRequest(user_id=1)).unwrap()
 For test-specific overrides, create a separate registry or call
 `mediator.register(...)` and `mediator.replace(...)`.
 
-See [CHANGELOG.md](CHANGELOG.md) for the complete v0.2 change summary.
+See the
+[changelog](https://github.com/aiagate/flow-med/blob/main/CHANGELOG.md) for the
+complete v0.2 change summary.
 
 ## Requirements
 

@@ -158,6 +158,7 @@ def test_sdist_contains_only_publishable_project_files(tmp_path: Path) -> None:
 
     assert names == {
         ".gitignore",
+        "CHANGELOG.md",
         "LICENSE",
         "PKG-INFO",
         "README.md",
