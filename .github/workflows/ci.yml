@@ -42,3 +42,8 @@ jobs:
 
       - name: Run tests
         run: uv run --frozen pytest --cov --cov-report=term-missing
+
+      - name: Run usage examples
+        run: |
+          uv run --frozen python examples/basic_usage.py
+          uv run --frozen python examples/di_usage.py
