@@ -34,7 +34,27 @@ jobs:
           enable-cache: true
           # Install a specific version of uv.
           version: "0.11.4"
-      - run: uv build
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run ruff format check
+        run: uv run --frozen ruff format --check .
+
+      - name: Run ruff linting
+        run: uv run --frozen ruff check .
+
+      - name: Run type checking with pyright
+        run: uv run --frozen pyright
+
+      - name: Run tests
+        run: uv run --frozen pytest --cov --cov-report=term-missing
+
+      - name: Build package distributions
+        run: uv build
+
       - name: Publish package distributions to PyPI
         # https://docs.pypi.org/trusted-publishers/using-a-publisher/
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
