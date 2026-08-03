@@ -78,10 +78,11 @@ if __name__ == "__main__":
 ```
 
 Registries are live references. Handlers added or explicitly replaced after a
-`Mediator` is created are visible to that mediator. Configure registries during
-application startup; concurrent registry mutation is not guaranteed to be
-thread-safe. Separate registries are isolated, while sharing a registry
-explicitly shares its handler mappings.
+`Mediator` is created are visible to that mediator. The registry synchronizes
+its handler-map operations, so concurrent registration, replacement, and lookup
+cannot corrupt the mapping or bypass duplicate/existence checks. Separate
+registries are isolated, while sharing a registry explicitly shares its handler
+mappings.
 
 ## Registration API
 
@@ -111,12 +112,12 @@ handler type. The injector therefore controls handler construction, dependency
 injection, and lifetime according to its bindings and scopes; `Mediator` does
 not cache handler instances.
 
-Treat registry setup and mutation as an application-startup concern.
-`HandlerRegistry` does not provide synchronization for concurrent
-`handler()`, `register()`, or `replace()` calls, or for mutation concurrent
-with request dispatch. Once configuration is complete, the thread-safety of
-resolved handlers and their dependencies is determined by those objects and
-their injector scopes.
+Treat registry setup and mutation as an application-startup concern even though
+the individual handler-map operations are synchronized. The lock does not
+freeze the live registry or provide a dispatch snapshot: a request may use the
+handler selected before a concurrent `replace()`. It also does not make
+resolved handlers or their dependencies thread-safe; that remains determined
+by those objects and their injector scopes.
 
 ## Error behavior
 

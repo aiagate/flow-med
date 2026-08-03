@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 import inspect
 import logging
+import threading
 from typing import Any, TypeVar, cast, get_args, get_origin
 
 from flow_res import AwaitableResult, Err, Result
@@ -43,6 +44,7 @@ class HandlerRegistry:
         self._request_handlers: dict[
             type[Request[Any]], type[RequestHandler[Any, Any]]
         ] = {}
+        self._request_handlers_lock = threading.RLock()
 
     def handler[
         T: Request[Any],
@@ -68,13 +70,13 @@ class HandlerRegistry:
 
         self._validate_request_type(request_type)
         self._validate_handler_type(request_type, handler_type)
-        if request_type in self._request_handlers:
-            raise DuplicateHandlerError(
-                request_type, self._request_handlers[request_type], handler_type
-            )
+        with self._request_handlers_lock:
+            existing = self._request_handlers.get(request_type)
+            if existing is not None:
+                raise DuplicateHandlerError(request_type, existing, handler_type)
+            self._request_handlers[request_type] = handler_type
 
         logger.debug("HandlerRegistry.register: %s -> %s", request_type, handler_type)
-        self._request_handlers[request_type] = handler_type
 
     def replace[
         T: Request[Any],
@@ -84,16 +86,18 @@ class HandlerRegistry:
 
         self._validate_request_type(request_type)
         self._validate_handler_type(request_type, handler_type)
-        if request_type not in self._request_handlers:
-            raise HandlerNotFoundError(request_type)
+        with self._request_handlers_lock:
+            if request_type not in self._request_handlers:
+                raise HandlerNotFoundError(request_type)
+            self._request_handlers[request_type] = handler_type
 
         logger.debug("HandlerRegistry.replace: %s -> %s", request_type, handler_type)
-        self._request_handlers[request_type] = handler_type
 
     def _handler_for(
         self, request_type: type[Request[Any]]
     ) -> type[RequestHandler[Any, Any]] | None:
-        return self._request_handlers.get(request_type)
+        with self._request_handlers_lock:
+            return self._request_handlers.get(request_type)
 
     def _validate_request_type(self, request_type: type[Any]) -> None:
         if not isinstance(request_type, type) or not issubclass(request_type, Request):
