@@ -99,8 +99,10 @@ explicitly shares its handler mappings.
   already exists.
 
 Registration validates that the handler is concrete, is declared for the given
-request type, and declares the same generic result type as the request. This is
-a declaration-level check: `flow-med` does not inspect or validate the value
+request type, declares the same generic result type as the request, and uses a
+`flow_res.Result[T, E]` result contract. Plain result values are rejected by
+Pyright and raise `InvalidHandlerError` during dynamic registration. This is a
+declaration-level check: `flow-med` does not inspect or validate the value
 returned by `handle()` at runtime. Static type checking and the handler
 implementation remain responsible for honoring the declared result contract.
 

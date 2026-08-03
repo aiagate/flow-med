@@ -119,7 +119,7 @@ def test_decorator_rejects_handlers_without_a_concrete_contract() -> None:
     with pytest.raises(InvalidHandlerError, match="abstract"):
         registry.handler(AbstractQueryHandler)
 
-    HandlerResultT = TypeVar("HandlerResultT")
+    HandlerResultT = TypeVar("HandlerResultT", bound=Result[Any, Any])
 
     class GenericResultHandler(
         RequestHandler[AnotherQuery, HandlerResultT], Generic[HandlerResultT]
@@ -205,6 +205,32 @@ def test_inconsistent_result_type_is_rejected(mediator: Mediator) -> None:
 
     with pytest.raises(InvalidHandlerError, match="result type"):
         mediator.register(NumberQuery, WrongResultHandler)
+
+
+def test_non_result_handler_contract_is_rejected_at_registration() -> None:
+    class Query(Request[Result[str, Exception]]):
+        pass
+
+    class PlainHandler(RequestHandler[Query, Any]):
+        @override
+        async def handle(self, request: Query) -> Any:
+            return "plain value"
+
+    with pytest.raises(InvalidHandlerError, match="flow_res.Result"):
+        HandlerRegistry().handler(PlainHandler)
+
+
+def test_non_result_request_contract_is_rejected_at_registration() -> None:
+    class Query(Request[Any]):
+        pass
+
+    class QueryHandler(RequestHandler[Query, Result[str, Exception]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, Exception]:
+            return Ok("result")
+
+    with pytest.raises(InvalidHandlerError, match="flow_res.Result"):
+        HandlerRegistry().handler(QueryHandler)
 
 
 @pytest.mark.anyio

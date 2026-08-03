@@ -78,6 +78,8 @@ def _run_pyright(path: Path, tmp_path: Path, *, extra_paths: list[Path]) -> dict
     [
         ("invalid_result.py", "reportIncompatibleMethodOverride"),
         ("invalid_registration.py", "reportArgumentType"),
+        ("invalid_plain_result.py", "reportInvalidTypeArguments"),
+        ("invalid_plain_request.py", "reportInvalidTypeArguments"),
     ],
 )
 def test_invalid_public_typing_contract_is_rejected(
