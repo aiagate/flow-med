@@ -126,8 +126,19 @@ by those objects and their injector scopes.
 - Registering a second handler for the same request type raises
   `DuplicateHandlerError`. Use `replace()` for an intentional replacement;
   the request type must already be registered.
-- Handler lookup uses the exact `type(request)`. A handler registered for a
-  base request class does not handle its subclasses.
+- Handler lookup first checks the exact `type(request)`. If no exact handler is
+  registered, it walks that request class's Python MRO from the concrete class
+  toward its bases and uses the first registered request handler. Therefore an
+  exact handler always wins over a base handler. For multiple inheritance,
+  Python's MRO is the selection rule: for `class Combined(Left, Right)`, a
+  handler registered for `Left` wins over one registered for `Right` when no
+  exact `Combined` handler exists. Registration order does not affect this
+  choice. If no class in the MRO has a handler, `HandlerNotFoundError` is
+  raised.
+- A base handler can handle subclasses that preserve the request's
+  `flow_res.Result[T, E]` contract. Dispatch validates the selected handler's
+  result contract against the concrete request and raises `InvalidHandlerError`
+  rather than returning a mismatched result for an incompatible hierarchy.
 - By default, exceptions raised by `Injector` or a handler propagate unchanged.
   To opt into Result-based handling at this boundary, pass the keyword-only
   `exception_mapper`; exceptions from handler resolution or execution are then

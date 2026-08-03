@@ -38,7 +38,11 @@ class RequestHandler[T: Request[Any], R: Result[Any, Any]](ABC):
 
 
 class HandlerRegistry:
-    """Store validated request-handler mappings for one application scope."""
+    """Store validated request-handler mappings for one application scope.
+
+    Lookup prefers an exact request-type mapping and otherwise follows the
+    request class's method resolution order (MRO).
+    """
 
     def __init__(self) -> None:
         self._request_handlers: dict[
@@ -96,8 +100,29 @@ class HandlerRegistry:
     def _handler_for(
         self, request_type: type[Request[Any]]
     ) -> type[RequestHandler[Any, Any]] | None:
+        """Find the exact handler or the first registered MRO base handler.
+
+        The registry lock protects only the mapping read and is released
+        before the mediator asks the injector to construct or invoke a
+        handler.
+        """
+        request_result = _request_result_type(request_type)
         with self._request_handlers_lock:
-            return self._request_handlers.get(request_type)
+            for candidate_type in request_type.__mro__:
+                handler_type = self._request_handlers.get(candidate_type)
+                if handler_type is None:
+                    continue
+
+                contract = _handler_contract(handler_type)
+                if contract is None or contract[1] != request_result:
+                    handler_result = None if contract is None else contract[1]
+                    raise InvalidHandlerError(
+                        handler_type,
+                        f"handler result type {handler_result!r} does not match "
+                        f"request result type {request_result!r} for {request_type!r}",
+                    )
+                return handler_type
+        return None
 
     def _validate_request_type(self, request_type: type[Any]) -> None:
         if not isinstance(request_type, type) or not issubclass(request_type, Request):

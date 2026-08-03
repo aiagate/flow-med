@@ -143,6 +143,27 @@ mediator.send_async(Query())
 custom_result: AwaitableResult[int, CustomError] = mediator.send_async(
     Query(), exception_mapper=lambda exc: CustomError(str(exc))
 )
+
+
+class BaseQuery(Request[Result[int, CustomError]]):
+    pass
+
+
+class ChildQuery(BaseQuery):
+    pass
+
+
+class BaseQueryHandler(RequestHandler[BaseQuery, Result[int, CustomError]]):
+    async def handle(self, request: BaseQuery) -> Result[int, CustomError]:
+        return Ok(2)
+
+
+inheritance_registry = HandlerRegistry()
+inheritance_registry.handler(BaseQueryHandler)
+inheritance_mediator = Mediator(Injector(), inheritance_registry)
+inheritance_result: AwaitableResult[int, CustomError] = (
+    inheritance_mediator.send_async(ChildQuery())
+)
 """,
         encoding="utf-8",
     )
