@@ -11,18 +11,20 @@ from injector import Injector
 logger = logging.getLogger(__name__)
 
 
-class Request[R]:
+class Request[R: Result[Any, Any]]:
     """Base class for all requests.
 
-    ``R`` is the exact result type returned by the request's handler.
+    ``R`` is the exact :class:`flow_res.Result` type returned by the request's
+    handler.
     """
 
     pass
 
 
-class RequestHandler[T: Request[Any], R](ABC):
+class RequestHandler[T: Request[Any], R: Result[Any, Any]](ABC):
     """Base class for request handlers.
 
+    ``R`` must be a :class:`flow_res.Result` type.
     Concrete subclasses are registered with an application-owned
     :class:`HandlerRegistry`.
     """
@@ -43,7 +45,7 @@ class HandlerRegistry:
 
     def handler[
         T: Request[Any],
-        R,
+        R: Result[Any, Any],
     ](self, handler_type: type[RequestHandler[T, R]]) -> type[RequestHandler[T, R]]:
         """Register ``handler_type`` by inferring its concrete request contract."""
 
@@ -59,7 +61,7 @@ class HandlerRegistry:
 
     def register[
         T: Request[Any],
-        R,
+        R: Result[Any, Any],
     ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
         """Register a handler, rejecting invalid or duplicate contracts."""
 
@@ -75,7 +77,7 @@ class HandlerRegistry:
 
     def replace[
         T: Request[Any],
-        R,
+        R: Result[Any, Any],
     ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
         """Replace an existing handler mapping explicitly."""
 
@@ -129,12 +131,17 @@ class HandlerRegistry:
         handler_result: Any,
     ) -> None:
         request_result = _request_result_type(request_type)
-        if (
-            request_result is not None
-            and request_result is not Any
-            and handler_result is not Any
-            and request_result != handler_result
-        ):
+        if not _is_result_type(request_result):
+            raise InvalidHandlerError(
+                handler_type,
+                "request must declare a flow_res.Result result type",
+            )
+        if not _is_result_type(handler_result):
+            raise InvalidHandlerError(
+                handler_type,
+                "handler must declare a flow_res.Result result type",
+            )
+        if request_result != handler_result:
             raise InvalidHandlerError(
                 handler_type,
                 f"result type {handler_result!r} does not match request result {request_result!r}",
@@ -171,7 +178,7 @@ class Mediator:
 
     def register[
         T: Request[Any],
-        R,
+        R: Result[Any, Any],
     ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
         """Register a handler in this mediator's live registry."""
 
@@ -179,7 +186,7 @@ class Mediator:
 
     def replace[
         T: Request[Any],
-        R,
+        R: Result[Any, Any],
     ](self, request_type: type[T], handler_type: type[RequestHandler[T, R]]) -> None:
         """Replace a handler in this mediator's live registry."""
 
@@ -203,6 +210,10 @@ def _handler_contract(
 def _request_result_type(request_type: type[Any]) -> Any | None:
     contract = _find_generic_base(request_type, Request)
     return None if contract is None else contract[0]
+
+
+def _is_result_type(value: Any) -> bool:
+    return get_origin(value) is Result
 
 
 def _find_generic_base(cls: type[Any], target: type[Any]) -> tuple[Any, ...] | None:
