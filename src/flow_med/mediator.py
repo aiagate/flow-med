@@ -1,11 +1,12 @@
 """Type-safe request/response mediation with dependency injection."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 import inspect
 import logging
 from typing import Any, TypeVar, cast, get_args, get_origin
 
-from flow_res import AwaitableResult, Result
+from flow_res import AwaitableResult, Err, Result
 from injector import Injector
 
 logger = logging.getLogger(__name__)
@@ -158,9 +159,17 @@ class Mediator:
         self._registry = HandlerRegistry() if registry is None else registry
 
     def send_async[T, E: Exception](
-        self, request: Request[Result[T, E]]
+        self,
+        request: Request[Result[T, E]],
+        *,
+        exception_mapper: Callable[[Exception], E] | None = None,
     ) -> AwaitableResult[T, E]:
-        """Send a request and return an awaitable result for method chaining."""
+        """Send a request and return an awaitable result for method chaining.
+
+        When ``exception_mapper`` is provided, exceptions raised while resolving
+        or invoking the handler are returned as ``Err`` values. Without a
+        mapper, those exceptions propagate unchanged.
+        """
 
         injector = self._injector
 
@@ -170,8 +179,13 @@ class Mediator:
             if handler_type is None:
                 raise HandlerNotFoundError(request)
 
-            handler = injector.get(handler_type)
-            result = await handler.handle(request)
+            try:
+                handler = injector.get(handler_type)
+                result = await handler.handle(request)
+            except Exception as exc:
+                if exception_mapper is None:
+                    raise
+                return Err(exception_mapper(exc))
             return cast(Result[T, E], result)
 
         return AwaitableResult(execute())

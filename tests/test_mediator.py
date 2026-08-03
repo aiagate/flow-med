@@ -1,12 +1,13 @@
 """Behavioral regression tests for scoped handler registries."""
 
+import asyncio
 from abc import abstractmethod
 from typing import Any, Generic, TypeVar, cast, override
 
 import flow_med
 import flow_med.mediator
 import pytest
-from flow_res import Ok, Result
+from flow_res import Err, Ok, Result
 from injector import Injector, Module, inject
 
 from flow_med import (
@@ -62,6 +63,160 @@ async def test_mediator_reports_an_unregistered_request(
         HandlerNotFoundError, match="Handler not found for request type"
     ):
         await mediator.send_async(AnotherQuery())
+
+
+@pytest.mark.anyio
+async def test_handler_exception_propagates_without_exception_mapper() -> None:
+    class HandlerFailure(Exception):
+        pass
+
+    class Query(Request[Result[str, HandlerFailure]]):
+        pass
+
+    class Handler(RequestHandler[Query, Result[str, HandlerFailure]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, HandlerFailure]:
+            raise RuntimeError("handler failed")
+
+    mediator = Mediator(Injector())
+    mediator.register(Query, Handler)
+
+    with pytest.raises(RuntimeError, match="handler failed"):
+        await mediator.send_async(Query())
+
+
+@pytest.mark.anyio
+async def test_handler_exception_can_be_mapped_to_err() -> None:
+    class HandlerFailure(Exception):
+        pass
+
+    class Query(Request[Result[str, HandlerFailure]]):
+        pass
+
+    class Handler(RequestHandler[Query, Result[str, HandlerFailure]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, HandlerFailure]:
+            raise RuntimeError("handler failed")
+
+    mediator = Mediator(Injector())
+    mediator.register(Query, Handler)
+
+    result = await mediator.send_async(
+        Query(),
+        exception_mapper=lambda exc: HandlerFailure(str(exc)),
+    )
+
+    assert isinstance(result, Err)
+    assert isinstance(result.error, HandlerFailure)
+    assert str(result.error) == "handler failed"
+
+
+@pytest.mark.anyio
+async def test_injector_exception_can_be_mapped_to_err() -> None:
+    class InjectorFailure(Exception):
+        pass
+
+    class Query(Request[Result[str, InjectorFailure]]):
+        pass
+
+    class Handler(RequestHandler[Query, Result[str, InjectorFailure]]):
+        def __init__(self) -> None:
+            raise RuntimeError("injector failed")
+
+        @override
+        async def handle(self, request: Query) -> Result[str, InjectorFailure]:
+            return Ok("unreachable")
+
+    mediator = Mediator(Injector())
+    mediator.register(Query, Handler)
+
+    result = await mediator.send_async(
+        Query(),
+        exception_mapper=lambda exc: InjectorFailure(str(exc)),
+    )
+
+    assert isinstance(result, Err)
+    assert isinstance(result.error, InjectorFailure)
+    assert str(result.error) == "injector failed"
+
+
+@pytest.mark.anyio
+async def test_exception_mapper_exception_propagates() -> None:
+    class MapperFailure(Exception):
+        pass
+
+    class Query(Request[Result[str, MapperFailure]]):
+        pass
+
+    class Handler(RequestHandler[Query, Result[str, MapperFailure]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, MapperFailure]:
+            raise RuntimeError("handler failed")
+
+    def mapper(exc: Exception) -> MapperFailure:
+        raise MapperFailure(f"could not map: {exc}")
+
+    mediator = Mediator(Injector())
+    mediator.register(Query, Handler)
+
+    with pytest.raises(MapperFailure, match="could not map: handler failed"):
+        await mediator.send_async(Query(), exception_mapper=mapper)
+
+
+@pytest.mark.anyio
+async def test_existing_err_is_returned_unchanged_with_exception_mapper() -> None:
+    class ExistingFailure(Exception):
+        pass
+
+    existing_error = ExistingFailure("already an Err")
+
+    class Query(Request[Result[str, ExistingFailure]]):
+        pass
+
+    class Handler(RequestHandler[Query, Result[str, ExistingFailure]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, ExistingFailure]:
+            return Err(existing_error)
+
+    def mapper(exc: Exception) -> ExistingFailure:
+        raise AssertionError("the mapper must not run for an existing Err")
+
+    mediator = Mediator(Injector())
+    mediator.register(Query, Handler)
+
+    result = await mediator.send_async(Query(), exception_mapper=mapper)
+
+    assert isinstance(result, Err)
+    assert result.error is existing_error
+
+
+@pytest.mark.anyio
+async def test_unregistered_request_is_not_mapped() -> None:
+    def mapper(exc: Exception) -> Exception:
+        raise AssertionError("the mapper must not run for an unregistered request")
+
+    with pytest.raises(HandlerNotFoundError):
+        await Mediator(Injector()).send_async(AnotherQuery(), exception_mapper=mapper)
+
+
+@pytest.mark.anyio
+async def test_cancelled_error_is_not_mapped() -> None:
+    class Query(Request[Result[str, Exception]]):
+        pass
+
+    class Handler(RequestHandler[Query, Result[str, Exception]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, Exception]:
+            raise asyncio.CancelledError
+
+    def mapper(exc: Exception) -> Exception:
+        raise AssertionError("CancelledError must not be mapped")
+
+    mediator = Mediator(Injector())
+    mediator.register(Query, Handler)
+
+    with pytest.raises(asyncio.CancelledError):
+        await mediator.send_async(Query(), exception_mapper=mapper)
 
 
 class AbstractQuery(Request[Result[str, Exception]]):

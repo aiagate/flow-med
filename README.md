@@ -127,9 +127,25 @@ their injector scopes.
   the request type must already be registered.
 - Handler lookup uses the exact `type(request)`. A handler registered for a
   base request class does not handle its subclasses.
-- Exceptions raised by `Injector` or a handler propagate unchanged. They are
-  not converted into an `Err`; handlers must return an `Err` explicitly when
-  failure is part of the request's `Result` contract.
+- By default, exceptions raised by `Injector` or a handler propagate unchanged.
+  To opt into Result-based handling at this boundary, pass the keyword-only
+  `exception_mapper`; exceptions from handler resolution or execution are then
+  returned as `Err` values:
+
+  ```python
+  class RequestFailure(Exception):
+      pass
+
+  result = await mediator.send_async(
+      GetUserRequest(user_id=1),
+      exception_mapper=lambda exc: RequestFailure(str(exc)),
+  )
+  ```
+
+  The mapper is not called for an already-returned `Err`, an unregistered
+  request still raises `HandlerNotFoundError`, and cancellation/system-level
+  exceptions are not converted. If no mapper is supplied, the existing
+  propagation behavior is preserved.
 
 ## Migrating from v0.1
 

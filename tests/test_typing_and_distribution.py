@@ -118,17 +118,21 @@ def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
     consumer = tmp_path / "consumer.py"
     consumer.write_text(
         """\
-from flow_res import Ok, Result
+from flow_res import AwaitableResult, Ok, Result
 from flow_med import HandlerRegistry, Mediator, Request, RequestHandler
 from injector import Injector
 
 
-class Query(Request[Result[int, Exception]]):
+class CustomError(Exception):
     pass
 
 
-class Handler(RequestHandler[Query, Result[int, Exception]]):
-    async def handle(self, request: Query) -> Result[int, Exception]:
+class Query(Request[Result[int, CustomError]]):
+    pass
+
+
+class Handler(RequestHandler[Query, Result[int, CustomError]]):
+    async def handle(self, request: Query) -> Result[int, CustomError]:
         return Ok(1)
 
 
@@ -136,6 +140,9 @@ registry = HandlerRegistry()
 registry.handler(Handler)
 mediator = Mediator(Injector(), registry)
 mediator.send_async(Query())
+custom_result: AwaitableResult[int, CustomError] = mediator.send_async(
+    Query(), exception_mapper=lambda exc: CustomError(str(exc))
+)
 """,
         encoding="utf-8",
     )
