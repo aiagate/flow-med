@@ -68,6 +68,119 @@ async def test_mediator_reports_an_unregistered_request(
 
 
 @pytest.mark.anyio
+async def test_base_handler_handles_subclass_request() -> None:
+    class BaseQuery(Request[Result[str, Exception]]):
+        pass
+
+    class ChildQuery(BaseQuery):
+        pass
+
+    class BaseQueryHandler(RequestHandler[BaseQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: BaseQuery) -> Result[str, Exception]:
+            return Ok("base")
+
+    registry = HandlerRegistry()
+    registry.handler(BaseQueryHandler)
+
+    mediator = Mediator(Injector(), registry)
+    assert await mediator.send_async(ChildQuery()).unwrap() == "base"
+
+
+@pytest.mark.anyio
+async def test_exact_handler_takes_precedence_over_base_handler() -> None:
+    class BaseQuery(Request[Result[str, Exception]]):
+        pass
+
+    class ChildQuery(BaseQuery):
+        pass
+
+    class BaseQueryHandler(RequestHandler[BaseQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: BaseQuery) -> Result[str, Exception]:
+            return Ok("base")
+
+    class ChildQueryHandler(RequestHandler[ChildQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: ChildQuery) -> Result[str, Exception]:
+            return Ok("exact")
+
+    registry = HandlerRegistry()
+    registry.handler(BaseQueryHandler)
+    registry.handler(ChildQueryHandler)
+
+    mediator = Mediator(Injector(), registry)
+    assert await mediator.send_async(ChildQuery()).unwrap() == "exact"
+
+
+@pytest.mark.anyio
+async def test_unregistered_request_hierarchy_raises_handler_not_found() -> None:
+    class BaseQuery(Request[Result[str, Exception]]):
+        pass
+
+    class ChildQuery(BaseQuery):
+        pass
+
+    with pytest.raises(HandlerNotFoundError, match="ChildQuery"):
+        await Mediator(Injector()).send_async(ChildQuery())
+
+
+@pytest.mark.anyio
+async def test_multiple_inheritance_uses_python_mro_for_handler_selection() -> None:
+    class LeftQuery(Request[Result[str, Exception]]):
+        pass
+
+    class RightQuery(Request[Result[str, Exception]]):
+        pass
+
+    class CombinedQuery(LeftQuery, RightQuery):
+        pass
+
+    class LeftQueryHandler(RequestHandler[LeftQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: LeftQuery) -> Result[str, Exception]:
+            return Ok("left")
+
+    class RightQueryHandler(RequestHandler[RightQuery, Result[str, Exception]]):
+        @override
+        async def handle(self, request: RightQuery) -> Result[str, Exception]:
+            return Ok("right")
+
+    registry = HandlerRegistry()
+    registry.handler(RightQueryHandler)
+    registry.handler(LeftQueryHandler)
+
+    mediator = Mediator(Injector(), registry)
+    assert await mediator.send_async(CombinedQuery()).unwrap() == "left"
+
+
+@pytest.mark.anyio
+async def test_inheritance_dispatch_rejects_incompatible_result_contract() -> None:
+    class TextQuery(Request[Result[str, Exception]]):
+        pass
+
+    class NumberQuery(Request[Result[int, Exception]]):
+        pass
+
+    class NumberQueryHandler(RequestHandler[NumberQuery, Result[int, Exception]]):
+        @override
+        async def handle(self, request: NumberQuery) -> Result[int, Exception]:
+            return Ok(1)
+
+    registry = HandlerRegistry()
+    registry.handler(NumberQueryHandler)
+    mediator = Mediator(Injector(), registry)
+
+    ConflictingQuery = cast(
+        type[Request[Result[str, Exception]]],
+        type("ConflictingQuery", (TextQuery, NumberQuery), {}),
+    )
+
+    with pytest.raises(InvalidHandlerError, match="result type"):
+        await mediator.send_async(ConflictingQuery())
+
+
+@pytest.mark.anyio
 async def test_handler_exception_propagates_without_exception_mapper() -> None:
     class HandlerFailure(Exception):
         pass
