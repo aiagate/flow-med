@@ -2,6 +2,8 @@
 
 import asyncio
 from abc import abstractmethod
+from concurrent.futures import ThreadPoolExecutor
+import threading
 from typing import Any, Generic, TypeVar, cast, override
 
 import flow_med
@@ -306,6 +308,126 @@ def test_duplicate_registration_is_rejected_at_registration_time() -> None:
 
     with pytest.raises(DuplicateHandlerError, match="Multiple handlers"):
         registry.handler(SecondHandler)
+
+
+def test_concurrent_unique_registrations_are_safe() -> None:
+    worker_count = 16
+    start = threading.Barrier(worker_count)
+    registry = HandlerRegistry()
+    pairs: list[
+        tuple[
+            type[Request[Any]],
+            type[RequestHandler[Any, Result[int, Exception]]],
+        ]
+    ] = []
+
+    for index in range(worker_count):
+
+        class Query(Request[Result[int, Exception]]):
+            pass
+
+        class Handler(RequestHandler[Query, Result[int, Exception]]):
+            @override
+            async def handle(self, request: Query) -> Result[int, Exception]:
+                return Ok(index)
+
+        pairs.append((Query, Handler))
+
+    def register(
+        pair: tuple[
+            type[Request[Any]],
+            type[RequestHandler[Any, Result[int, Exception]]],
+        ],
+    ) -> None:
+        start.wait()
+        registry.register(*pair)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(register, pair) for pair in pairs]
+        for future in futures:
+            future.result()
+
+    assert all(registry._handler_for(query) is handler for query, handler in pairs)
+
+
+def test_concurrent_duplicate_registrations_allow_only_one_success() -> None:
+    worker_count = 16
+    start = threading.Barrier(worker_count)
+    registry = HandlerRegistry()
+
+    class Query(Request[Result[int, Exception]]):
+        pass
+
+    handlers: list[type[RequestHandler[Query, Result[int, Exception]]]] = []
+    for index in range(worker_count):
+
+        class Handler(RequestHandler[Query, Result[int, Exception]]):
+            @override
+            async def handle(self, request: Query) -> Result[int, Exception]:
+                return Ok(index)
+
+        handlers.append(Handler)
+
+    def register(handler: type[RequestHandler[Query, Result[int, Exception]]]) -> bool:
+        start.wait()
+        try:
+            registry.register(Query, handler)
+        except DuplicateHandlerError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(register, handler) for handler in handlers]
+        successes = [future.result() for future in futures]
+
+    assert sum(successes) == 1
+    assert registry._handler_for(Query) in handlers
+
+
+def test_concurrent_replace_and_lookup_are_safe() -> None:
+    registry = HandlerRegistry()
+    start = threading.Barrier(2)
+    lookup_ready = threading.Event()
+    stop = threading.Event()
+
+    class Query(Request[Result[str, Exception]]):
+        pass
+
+    class FirstHandler(RequestHandler[Query, Result[str, Exception]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, Exception]:
+            return Ok("first")
+
+    class SecondHandler(RequestHandler[Query, Result[str, Exception]]):
+        @override
+        async def handle(self, request: Query) -> Result[str, Exception]:
+            return Ok("second")
+
+    registry.register(Query, FirstHandler)
+    observed: list[type[RequestHandler[Query, Result[str, Exception]]] | None] = []
+
+    def replace() -> None:
+        start.wait()
+        lookup_ready.wait()
+        for index in range(500):
+            registry.replace(Query, SecondHandler if index % 2 else FirstHandler)
+        stop.set()
+
+    def lookup() -> None:
+        start.wait()
+        observed.append(registry._handler_for(Query))
+        lookup_ready.set()
+        while not stop.is_set():
+            observed.append(registry._handler_for(Query))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        replace_future = executor.submit(replace)
+        lookup_future = executor.submit(lookup)
+        replace_future.result()
+        lookup_future.result()
+
+    assert observed
+    assert set(observed) <= {FirstHandler, SecondHandler}
 
 
 def test_registration_validation_and_explicit_replacement(mediator: Mediator) -> None:
