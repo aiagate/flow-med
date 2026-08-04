@@ -380,6 +380,75 @@ async def test_decorator_resolves_a_concrete_intermediate_generic_handler() -> N
     )
 
 
+def test_decorator_rejects_ambiguous_handler_contract() -> None:
+    class TextHandlerBase(
+        Generic[RequestT], RequestHandler[RequestT, Result[str, Exception]]
+    ):
+        async def handle(self, request: RequestT) -> Result[str, Exception]:
+            return Ok("text")
+
+    class NumberHandlerBase(
+        Generic[RequestT], RequestHandler[RequestT, Result[int, Exception]]
+    ):
+        async def handle(self, request: RequestT) -> Result[int, Exception]:
+            return Ok(1)
+
+    class AmbiguousHandler(  # pyright: ignore[reportGeneralTypeIssues, reportIncompatibleMethodOverride]
+        TextHandlerBase[GenericQuery], NumberHandlerBase[GenericQuery]
+    ):
+        pass
+
+    with pytest.raises(InvalidHandlerError, match="concrete RequestHandler"):
+        HandlerRegistry().handler(cast(Any, AmbiguousHandler))
+
+
+def test_decorator_allows_duplicate_handler_contract_paths() -> None:
+    class FirstHandlerBase(
+        Generic[RequestT], RequestHandler[RequestT, Result[str, Exception]]
+    ):
+        async def handle(self, request: RequestT) -> Result[str, Exception]:
+            return Ok("first")
+
+    class SecondHandlerBase(
+        Generic[RequestT], RequestHandler[RequestT, Result[str, Exception]]
+    ):
+        async def handle(self, request: RequestT) -> Result[str, Exception]:
+            return Ok("second")
+
+    class DuplicateContractHandler(
+        FirstHandlerBase[GenericQuery], SecondHandlerBase[GenericQuery]
+    ):
+        pass
+
+    registry = HandlerRegistry()
+    registry.handler(cast(Any, DuplicateContractHandler))
+
+
+def test_decorator_rejects_ambiguous_request_contract() -> None:
+    BranchT = TypeVar("BranchT")
+
+    class TextRequestBase(Generic[BranchT], Request[Result[str, Exception]]):
+        pass
+
+    class NumberRequestBase(Generic[BranchT], Request[Result[int, Exception]]):
+        pass
+
+    class AmbiguousRequest(  # pyright: ignore[reportGeneralTypeIssues]
+        TextRequestBase[object], NumberRequestBase[object]
+    ):
+        pass
+
+    class AmbiguousRequestHandler(
+        RequestHandler[AmbiguousRequest, Result[str, Exception]]
+    ):
+        @override
+        async def handle(self, request: AmbiguousRequest) -> Result[str, Exception]:
+            return Ok("text")
+
+    with pytest.raises(InvalidHandlerError, match="request must declare"):
+        HandlerRegistry().handler(AmbiguousRequestHandler)
+
+
 def test_decorator_rejects_handlers_without_a_concrete_contract() -> None:
     registry = HandlerRegistry()
 
@@ -755,3 +824,6 @@ def test_generic_introspection_handles_non_matching_and_nested_types() -> None:
 
     NestedTypeT = cast(Any, TypeVar("NestedTypeT"))
     assert _resolve_type(list[NestedTypeT], {NestedTypeT: str}) == list[str]
+    assert _resolve_type(NestedTypeT, {}) is None
+    assert _resolve_type(NestedTypeT, {NestedTypeT: NestedTypeT}) is None
+    assert _resolve_type(list[NestedTypeT], {}) is None
