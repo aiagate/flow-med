@@ -141,8 +141,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "flow-res", specifier = ">=0.1.1" },
-    { name = "injector", specifier = ">=0.24.0" },
+    { name = "flow-res", specifier = ">=0.1.1,<0.2.0" },
+    { name = "injector", specifier = ">=0.24.0,<0.25.0" },
 ]
 
 [package.metadata.requires-dev]
