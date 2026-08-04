@@ -2,6 +2,15 @@
 
 This file records user-visible changes for tagged releases.
 
+## Unreleased
+
+### Compatibility
+
+- Bounded runtime dependencies to the verified 0.x API lines:
+  `flow-res>=0.1.1,<0.2.0` and `injector>=0.24.0,<0.25.0`. This prevents a
+  future minor release with breaking API changes from being selected by a
+  PyPI installation while still allowing compatible patch releases.
+
 ## 0.2.0 - 2026-07-28
 
 ### Breaking changes

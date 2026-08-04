@@ -186,8 +186,13 @@ complete v0.2 change summary.
 ## Requirements
 
 - Python 3.13 or higher.
-- [flow-res](https://github.com/aiagate/flow-res)
-- [injector](https://github.com/alecthomas/injector)
+- [flow-res](https://github.com/aiagate/flow-res) 0.1.x (`>=0.1.1,<0.2.0`)
+- [injector](https://github.com/alecthomas/injector) 0.24.x (`>=0.24.0,<0.25.0`)
+
+Both runtime dependencies are still in the 0.x series, where a minor release
+may include breaking API changes. The bounds keep PyPI installations within
+the API lines verified by `flow-med` while allowing compatible patch releases;
+the bounds are part of the published package metadata, not only `uv.lock`.
 
 ## License
 

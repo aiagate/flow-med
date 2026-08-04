@@ -1,6 +1,8 @@
 """Regression tests for static typing and distribution metadata."""
 
 import json
+from email.parser import Parser
+import re
 import shutil
 import subprocess
 import tarfile
@@ -11,6 +13,28 @@ import pytest
 
 
 ROOT = Path(__file__).parents[1]
+
+
+def _assert_bounded_runtime_dependency(metadata: str, dependency: str) -> None:
+    requirements = Parser().parsestr(metadata).get_all("Requires-Dist", [])
+    requirement = next(
+        (
+            value.split(";", 1)[0].strip()
+            for value in requirements
+            if re.match(
+                rf"^{re.escape(dependency)}(?:\[[^]]+\])?(?=[<>=!~\s]|$)",
+                value,
+                flags=re.IGNORECASE,
+            )
+        ),
+        None,
+    )
+    assert requirement is not None, (dependency, requirements)
+
+    specifier = requirement[len(dependency) :].strip()
+    constraints = {part.strip() for part in specifier.split(",")}
+    assert any(part.startswith(">=") for part in constraints), requirement
+    assert any(part.startswith("<") for part in constraints), requirement
 
 
 def _build_distribution(tmp_path: Path, distribution: str) -> Path:
@@ -113,6 +137,8 @@ def test_wheel_contains_py_typed_and_supports_consumer_typecheck(
             "Summary: A type-safe asynchronous Mediator implementation for Python"
             in metadata
         )
+        _assert_bounded_runtime_dependency(metadata, "flow-res")
+        _assert_bounded_runtime_dependency(metadata, "injector")
         wheel.extractall(package_dir)
 
     consumer = tmp_path / "consumer.py"
