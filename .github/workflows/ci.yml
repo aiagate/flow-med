@@ -47,7 +47,11 @@ jobs:
         run: uv run --frozen pyright
 
       - name: Run tests
-        run: uv run --frozen pytest --cov --cov-report=term-missing
+        # The release-ref tests execute a Bash script directly, which is not
+        # executable through Windows Python's subprocess API.
+        run: >-
+          uv run --frozen pytest --cov --cov-report=term-missing
+          ${{ runner.os == 'Windows' && '--ignore=tests/test_verify_release_ref.py' || '' }}
 
       - name: Run usage examples
         run: |
