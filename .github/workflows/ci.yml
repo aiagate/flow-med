@@ -8,7 +8,13 @@ on:
 
 jobs:
   lint-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.13", "3.14"]
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -18,7 +24,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version-file: "pyproject.toml"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         # https://github.com/astral-sh/setup-uv
@@ -41,7 +47,11 @@ jobs:
         run: uv run --frozen pyright
 
       - name: Run tests
-        run: uv run --frozen pytest --cov --cov-report=term-missing
+        # The release-ref tests execute a Bash script directly, which is not
+        # executable through Windows Python's subprocess API.
+        run: >-
+          uv run --frozen pytest --cov --cov-report=term-missing
+          ${{ runner.os == 'Windows' && '--ignore=tests/test_verify_release_ref.py' || '' }}
 
       - name: Run usage examples
         run: |
