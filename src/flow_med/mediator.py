@@ -262,52 +262,83 @@ def _is_result_type(value: Any) -> bool:
 def _find_generic_base(cls: type[Any], target: type[Any]) -> tuple[Any, ...] | None:
     """Resolve a target generic base while substituting intermediate TypeVars."""
 
-    def visit(
-        current: type[Any], substitutions: dict[TypeVar, Any]
-    ) -> tuple[Any, ...] | None:
+    contracts: list[tuple[Any, ...]] = []
+    unresolved_path = False
+
+    def visit(current: type[Any], substitutions: dict[TypeVar, Any]) -> None:
+        nonlocal unresolved_path
+
         for base in getattr(current, "__orig_bases__", ()):
             origin = get_origin(base) or base
+            is_target = origin is target
+            is_target_subclass = isinstance(origin, type) and issubclass(origin, target)
+            if not is_target and not is_target_subclass:
+                continue
+
             args = get_args(base)
             parameters = getattr(origin, "__parameters__", ())
             local_substitutions = dict(substitutions)
-            for parameter, argument in zip(parameters, args, strict=False):
-                local_substitutions[parameter] = _resolve_type(argument, substitutions)
+            resolved_args: list[Any] = []
+            path_is_resolved = True
 
-            resolved_args = tuple(
-                _resolve_type(argument, substitutions) for argument in args
-            )
-            if origin is target:
-                return resolved_args
-            if isinstance(origin, type) and issubclass(origin, target):
-                result = visit(origin, local_substitutions)
-                if result is not None:
-                    return result
+            for argument in args:
+                resolved_argument = _resolve_type(argument, substitutions)
+                if resolved_argument is None:
+                    unresolved_path = True
+                    path_is_resolved = False
+                    break
+                resolved_args.append(resolved_argument)
+            if not path_is_resolved:
+                continue
+            for parameter, resolved_argument in zip(
+                parameters, resolved_args, strict=False
+            ):
+                local_substitutions[parameter] = resolved_argument
+
+            if is_target:
+                contracts.append(tuple(resolved_args))
+            else:
+                visit(origin, local_substitutions)
+
+    visit(cls, {})
+    if unresolved_path or not contracts:
         return None
 
-    return visit(cls, {})
+    first_contract = contracts[0]
+    if any(contract != first_contract for contract in contracts[1:]):
+        return None
+    return first_contract
 
 
 def _resolve_type(value: Any, substitutions: dict[TypeVar, Any]) -> Any:
-    while isinstance(value, TypeVar) and value in substitutions:
+    seen_typevars: set[TypeVar] = set()
+    while isinstance(value, TypeVar):
+        if value not in substitutions or value in seen_typevars:
+            return None
+        seen_typevars.add(value)
         replacement = substitutions[value]
-        if replacement is value:  # pragma: no cover - guarded malformed environment
-            break
         value = replacement
     args = get_args(value)
     if not args:
         return value
 
-    resolved_args = tuple(_resolve_type(argument, substitutions) for argument in args)
+    resolved_args_list: list[Any] = []
+    for argument in args:
+        resolved_argument = _resolve_type(argument, substitutions)
+        if resolved_argument is None:
+            return None
+        resolved_args_list.append(resolved_argument)
+    resolved_args = tuple(resolved_args_list)
     if resolved_args == args:
         return value
 
     origin = get_origin(value)
     if origin is None:
-        return value
+        return None
     try:
         return origin[resolved_args[0] if len(resolved_args) == 1 else resolved_args]
     except (AttributeError, TypeError):
-        return value
+        return None
 
 
 def _contains_typevar(value: Any) -> bool:
